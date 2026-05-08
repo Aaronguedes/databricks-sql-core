@@ -1,0 +1,16 @@
+resources:
+  repositories:
+  - repository: template_dataops_dab
+    type: git
+    name: datacloud/template_dataops_dab 
+    ref: refs/heads/feature/create-seeding-control-routine                                      
+
+trigger:
+  - main
+
+extends:
+  template: pipelines/hmg-ci.yml@template_dataops_dab
+  parameters:
+    projectName: test_deploy
+
+

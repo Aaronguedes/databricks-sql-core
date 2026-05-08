@@ -1,0 +1,12 @@
+resources:
+  repositories:
+  - repository: template_dataops_dab    
+    type: git
+    name: datacloud/template_dataops_dab
+    ref: refs/heads/main
+
+trigger:
+- release
+
+stages:
+- template: pipelines/release-prd.yml@template_dataops_dab

@@ -1,0 +1,298 @@
+trigger:
+  branches:
+    include:
+    - main
+  paths:
+    exclude:
+    - README.md
+    - '*.md'
+
+pr:
+  branches:
+    include:
+    - main
+  paths:
+    exclude:
+    - README.md
+    - '*.md'
+
+variables:
+- name: vmImageName
+  value: 'ubuntu-latest'
+- name: workingDirectory
+  value: '$(System.DefaultWorkingDirectory)'
+- name: pythonVersion
+  value: '3.11'
+
+stages:
+- stage: SecurityScan
+  displayName: 'Verificação de Segurança'
+  jobs:
+  - job: BanditScan
+    displayName: 'Análise de Segurança - Bandit'
+    pool:
+      vmImage: $(vmImageName)
+
+    steps:
+    - task: UsePythonVersion@0
+      displayName: 'Configurar Python $(pythonVersion)'
+      inputs:
+        versionSpec: $(pythonVersion)
+        addToPath: true
+
+    - bash: |
+        python -m pip install --upgrade pip
+        pip install bandit[toml]
+      displayName: 'Instalar Bandit'
+
+    - bash: |
+        bandit -r app/ -f json -o bandit-report.json
+        exit_code=$?
+
+        if [ $exit_code -ne 0 ]; then
+          high_issues=$(grep -o '"issue_severity": "HIGH"' bandit-report.json | wc -l)
+          
+          if [ "$high_issues" -gt 0 ]; then
+            echo "##[error]Bandit encontrou $high_issues vulnerabilidades de severidade ALTA!"
+            cat bandit-report.json
+            exit 1
+          else
+            echo "Bandit encontrou problemas mas nenhum de severidade ALTA"
+          fi
+        fi
+
+        echo "Verificação Bandit passou - nenhuma vulnerabilidade ALTA encontrada"
+      workingDirectory: $(workingDirectory)
+      displayName: 'Executar Scan de Segurança Bandit'
+      continueOnError: false
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publicar Relatório Bandit'
+      condition: always()
+      inputs:
+        targetPath: '$(workingDirectory)/bandit-report.json'
+        artifact: 'bandit-security-report'
+        publishLocation: 'pipeline'
+
+  - job: GitleaksScan
+    displayName: 'Detecção de Secrets - Gitleaks'
+    pool:
+      vmImage: $(vmImageName)
+
+    steps:
+    - bash: |
+        wget https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz
+        tar -xzf gitleaks_8.21.2_linux_x64.tar.gz
+        chmod +x gitleaks
+        sudo mv gitleaks /usr/local/bin/
+      displayName: 'Instalar Gitleaks'
+
+    - bash: |
+        gitleaks detect --source=$(workingDirectory) --report-path=gitleaks-report.json --report-format=json --verbose
+
+        if [ $? -ne 0 ]; then
+          echo "##[error]Gitleaks encontrou secrets no código!"
+          cat gitleaks-report.json
+          exit 1
+        fi
+
+        echo "Verificação Gitleaks passou - nenhum secret detectado"
+      workingDirectory: $(workingDirectory)
+      displayName: 'Executar Detecção de Secrets Gitleaks'
+      continueOnError: false
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publicar Relatório Gitleaks'
+      condition: always()
+      inputs:
+        targetPath: '$(workingDirectory)/gitleaks-report.json'
+        artifact: 'gitleaks-report'
+        publishLocation: 'pipeline'
+
+  - job: DetectSecretsScan
+    displayName: 'Detecção de Secrets - Detect-Secrets'
+    pool:
+      vmImage: $(vmImageName)
+
+    steps:
+    - task: UsePythonVersion@0
+      displayName: 'Configurar Python $(pythonVersion)'
+      inputs:
+        versionSpec: $(pythonVersion)
+        addToPath: true
+
+    - bash: |
+        python -m pip install --upgrade pip
+        pip install detect-secrets
+      displayName: 'Instalar Detect-Secrets'
+
+    - bash: |
+        if [ ! -f .secrets.baseline ]; then
+          echo "Criando baseline detect-secrets..."
+          detect-secrets scan > .secrets.baseline
+        fi
+
+        detect-secrets scan --baseline .secrets.baseline
+
+        if [ $? -ne 0 ]; then
+          echo "##[error]Detect-secrets encontrou novos secrets no código!"
+          detect-secrets audit .secrets.baseline
+          exit 1
+        fi
+
+        echo "Verificação Detect-secrets passou - nenhum novo secret detectado"
+      workingDirectory: $(workingDirectory)
+      displayName: 'Executar Scan Detect-Secrets'
+      continueOnError: false
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publicar Baseline Detect-Secrets'
+      condition: always()
+      inputs:
+        targetPath: '$(workingDirectory)/.secrets.baseline'
+        artifact: 'detect-secrets-baseline'
+        publishLocation: 'pipeline'
+
+- stage: CodeQuality
+  displayName: 'Qualidade de Código'
+  dependsOn: SecurityScan
+  jobs:
+  - job: BlackFormatter
+    displayName: 'Formatação de Código - Black'
+    pool:
+      vmImage: $(vmImageName)
+
+    steps:
+    - task: UsePythonVersion@0
+      displayName: 'Configurar Python $(pythonVersion)'
+      inputs:
+        versionSpec: $(pythonVersion)
+        addToPath: true
+
+    - bash: |
+        python -m pip install --upgrade pip
+        pip install black
+      displayName: 'Instalar Black'
+
+    - bash: |
+        black --check --diff app/
+        if [ $? -ne 0 ]; then
+          echo "##[error]Black encontrou problemas de formatação. Execute 'black app/' localmente para corrigir."
+          exit 1
+        fi
+        echo "Verificação de formatação Black passou!"
+      workingDirectory: $(workingDirectory)
+      displayName: 'Executar Verificação Black'
+      continueOnError: false
+
+  - job: PylintLinter
+    displayName: 'Análise de Código - Pylint'
+    pool:
+      vmImage: $(vmImageName)
+
+    steps:
+    - task: UsePythonVersion@0
+      displayName: 'Configurar Python $(pythonVersion)'
+      inputs:
+        versionSpec: $(pythonVersion)
+        addToPath: true
+
+    - bash: |
+        python -m pip install --upgrade pip
+        pip install pylint
+      displayName: 'Instalar Pylint'
+
+    - bash: |
+        pylint app/ --output-format=text --reports=y --score=y > pylint-report.txt || true
+
+        score=$(grep -oP "rated at \K[0-9]+\.[0-9]+" pylint-report.txt || echo "0")
+
+        echo "Pontuação Pylint: $score/10"
+        cat pylint-report.txt
+
+        if (( $(echo "$score < 7.0" | bc -l) )); then
+          echo "##[error]Pontuação Pylint ($score) está abaixo do mínimo de 7.0"
+          exit 1
+        fi
+
+        echo "Verificação Pylint passou com pontuação: $score/10"
+      workingDirectory: $(workingDirectory)
+      displayName: 'Executar Análise Pylint'
+      continueOnError: false
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publicar Relatório Pylint'
+      condition: always()
+      inputs:
+        targetPath: '$(workingDirectory)/pylint-report.txt'
+        artifact: 'pylint-report'
+        publishLocation: 'pipeline'
+
+  - job: NotebookQuality
+    displayName: 'Qualidade de Notebooks - nbqa'
+    pool:
+      vmImage: $(vmImageName)
+
+    steps:
+    - task: UsePythonVersion@0
+      displayName: 'Configurar Python $(pythonVersion)'
+      inputs:
+        versionSpec: $(pythonVersion)
+        addToPath: true
+
+    - bash: |
+        python -m pip install --upgrade pip
+        pip install nbqa black isort flake8
+      displayName: 'Instalar nbqa e ferramentas'
+
+    - bash: |
+        if ! find app/ -name "*.ipynb" -type f | grep -q .; then
+          echo "Nenhum notebook Jupyter encontrado em app/ - pulando verificações nbqa"
+          exit 0
+        fi
+
+        echo "Executando verificações nbqa nos notebooks..."
+
+        echo "Verificando formatação de código com black..."
+        nbqa black app/ --check || { echo "##[error]Problemas de formatação Black encontrados nos notebooks"; exit 1; }
+
+        echo "Verificando ordenação de imports com isort..."
+        nbqa isort app/ --check-only || { echo "##[error]Problemas de ordenação de imports encontrados nos notebooks"; exit 1; }
+
+        echo "Executando linting flake8..."
+        nbqa flake8 app/ --max-line-length=88 --extend-ignore=E203,W503 || { echo "##[error]Problemas de linting Flake8 encontrados nos notebooks"; exit 1; }
+
+        echo "Todas as verificações de qualidade de notebooks passaram!"
+      workingDirectory: $(workingDirectory)
+      displayName: 'Executar Verificações de Qualidade nbqa'
+      continueOnError: false
+
+- stage: Build
+  displayName: 'Build'
+  dependsOn: CodeQuality
+  jobs:
+  - job: BuildJob
+    displayName: 'Build e Instalação de Dependências'
+    pool:
+      vmImage: $(vmImageName)
+
+    steps:
+    - task: Cache@2
+      displayName: 'Cache de dependências pip'
+      inputs:
+        key: 'python | "$(Agent.OS)" | requirements.txt'
+        restoreKeys: |
+          python | "$(Agent.OS)"
+        path: $(Pipeline.Workspace)/.pip
+
+    - task: UsePythonVersion@0
+      displayName: 'Configurar Python $(pythonVersion)'
+      inputs:
+        versionSpec: $(pythonVersion)
+        addToPath: true
+
+    - bash: |
+        python -m pip install --upgrade pip
+        pip install --cache-dir $(Pipeline.Workspace)/.pip --target="./.python_packages/lib/site-packages" -r ./requirements.txt
+      workingDirectory: $(workingDirectory)
+      displayName: 'Instalar Dependências'

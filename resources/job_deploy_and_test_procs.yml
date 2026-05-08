@@ -1,0 +1,50 @@
+resources:
+  jobs:
+    deploy_and_test_sql_procs:
+      name: deploy_and_test_sql_procs
+
+      queue:
+        enabled: true
+
+      parameters:
+        - name: env
+          default: ${var.env}
+
+      tasks:
+        - task_key: declare_proc_load_config
+          notebook_task:
+            notebook_path: ${var.notebook_base_path}/proc_load_config.ipynb
+            base_parameters:
+              env: ${var.env}
+
+        - task_key: declare_proc_prepare_target
+          depends_on:
+            - task_key: declare_proc_load_config
+          notebook_task:
+            notebook_path: ${var.notebook_base_path}/proc_prepare_target.ipynb
+            base_parameters:
+              env: ${var.env}
+
+        - task_key: declare_proc_schema_check
+          depends_on:
+            - task_key: declare_proc_prepare_target
+          notebook_task:
+            notebook_path: ${var.notebook_base_path}/proc_schema_check.ipynb
+            base_parameters:
+              env: ${var.env}
+
+        - task_key: declare_proc_silver_scd1
+          depends_on:
+            - task_key: declare_proc_schema_check
+          notebook_task:
+            notebook_path: ${var.notebook_base_path}/proc_silver_scd1.ipynb
+            base_parameters:
+              env: ${var.env}
+
+        # - task_key: run_test_procs
+        #   depends_on:
+        #     - task_key: declare_proc_silver_scd1
+        #   notebook_task:
+        #     notebook_path: ${var.notebook_base_path}/test_procs.ipynb
+        #     base_parameters:
+        #       env: ${var.env}

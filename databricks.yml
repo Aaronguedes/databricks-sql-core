@@ -1,0 +1,61 @@
+bundle:
+  name: sql-procs-deploy-and-test
+
+
+include:
+  - resources/*.yml
+
+variables:
+  env:
+    description: Environment suffix passed to notebooks
+    default: dev
+
+  notebook_base_path:
+    description: Relative repo path where notebooks live
+    default: ../src/procs
+
+targets:
+  dev:
+    default: true
+    mode: development
+    workspace:
+      host: https://adb-330966528931476.16.azuredatabricks.net/
+    variables:
+      env: dev
+    presets:
+      tags:
+        env: dev
+        project: sql-procs
+        domain: platform
+        system: platform
+
+  hmg:
+    workspace:
+      host: ${env.DATABRICKS_HOST}
+    run_as:
+      service_principal_name: ${env.AZURE_SP_CLIENT_ID}
+    variables:
+      env: hml
+    presets:
+      name_prefix: "hmg_"
+      tags:
+        env: hmg
+        project: sql-procs
+        domain: platform
+        system: platform
+
+  prod:
+    workspace:
+      host: ${env.DATABRICKS_HOST}
+    run_as:
+      service_principal_name: ${env.AZURE_SP_CLIENT_ID}
+    variables:
+      env: prd
+    presets:
+      tags:
+        env: prod
+        project: sql-procs
+        domain: platform
+        system: platform
+
+  # existing_cluster_id: ${env.EXISTING_CLUSTER_ID}

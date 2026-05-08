@@ -1,0 +1,40 @@
+{
+  "cfg_config": {
+    "config_id": "cfg_silver_mock_customer_dim",
+    "project": "mock_project",
+    "domain": "mockdomain",
+    "system": "test_deploy",
+    "layer": "SILVER",
+    "config_name": "customer_dim",
+    "is_active": true
+  },
+  "cfg_source": {
+    "source_type": "TABLE",
+    "source_format": "DELTA",
+    "source_catalog": "lakehouse",
+    "source_schema": "bronze_mock",
+    "source_object": "customer_src",
+    "load_mode": "FULL",
+    "watermark_column": null,
+    "watermark_initial_value": null,
+    "lookback_days": 0
+  },
+  "cfg_target": {
+    "target_type": "TABLE",
+    "target_format": "DELTA",
+    "target_catalog": "lakehouse",
+    "target_schema": "silver_mock",
+    "target_object": "customer_dim",
+    "write_mode": "MERGE",
+    "business_keys": ["customer_id"],
+    "clustering_columns": [],
+    "target_schema_definition": {
+      "customer_id": "INT",
+      "customer_name": "STRING",
+      "city": "STRING",
+      "updated_at": "TIMESTAMP",
+      "_hashkey": "STRING"
+    }
+  },
+  "cfg_table_constraints": []
+}
